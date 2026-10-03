@@ -38,7 +38,6 @@ jobs:
 
       - name: Obfuscate Code
         run: |
-          # 混淆并压缩代码，确保不会破坏 Worker 的环境
           javascript-obfuscator _worker.js --output _worker_obf.js --compact true --control-flow-flattening true --dead-code-injection true --string-array true --string-array-encoding 'base64'
           echo "代码混淆完成！"
 
@@ -49,13 +48,13 @@ jobs:
           main = "_worker_obf.js"
           compatibility_date = "2023-10-30"
 
-          [[kv_namespaces]]
-          binding = "C"
-          id = "bffe84479c1b43c1b04475b57d75e435"
-
           routes = [
             { pattern = "20261003c_f_new.209app.ccwu.cc", custom_domain = true }
           ]
+
+          [[kv_namespaces]]
+          binding = "C"
+          id = "bffe84479c1b43c1b04475b57d75e435"
           EOF
 
       - name: Deploy to Cloudflare Workers
