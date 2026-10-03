@@ -48,7 +48,7 @@ jobs:
           workers_dev = false
 
           routes = [
-            { pattern = "20261003c_f_new.209app.ccwu.cc", custom_domain = true }
+            { pattern = "20261003c-f-new.209app.ccwu.cc", custom_domain = true }
           ]
 
           [[kv_namespaces]]
