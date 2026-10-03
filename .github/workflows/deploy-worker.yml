@@ -1,0 +1,59 @@
+name: Auto Sync, Obfuscate & Deploy Worker
+
+on:
+  schedule:
+    - cron: '0 2 * * *' # 每天自动运行
+  workflow_dispatch:    # 手动触发按钮
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Sync from Upstream
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/byJoey/cfnewup.git
+          git fetch upstream
+          git merge upstream/main --allow-unrelated-histories -m "Auto-merge upstream" || git merge upstream/master --allow-unrelated-histories -m "Auto-merge upstream" || echo "No merge needed."
+          
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install JavaScript Obfuscator
+        run: npm install -g javascript-obfuscator
+
+      - name: Obfuscate Code
+        run: |
+          javascript-obfuscator _worker.js --output _worker_obf.js --compact true --control-flow-flattening true --dead-code-injection true
+          echo "代码混淆完成！"
+
+      - name: Generate Wrangler Config
+        run: |
+          cat << 'EOF' > wrangler.toml
+          name = "cf-new-worker"
+          main = "_worker_obf.js"
+          compatibility_date = "2023-10-30"
+
+          routes = [
+            { pattern = "20261003c_f_new.209app.ccwu.cc", custom_domain = true }
+          ]
+          EOF
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          command: deploy
+        env:
+          CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_GLOBAL_KEY }}
+          CLOUDFLARE_EMAIL: ${{ secrets.CLOUDFLARE_EMAIL }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
