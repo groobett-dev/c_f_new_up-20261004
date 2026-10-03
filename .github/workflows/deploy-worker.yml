@@ -17,57 +17,34 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: 智能对比上游更新
-        id: check_update
+      - name: Sync from Upstream
         run: |
-          # 1. 下载上游最新的文件到临时文件
-          curl -sL https://raw.githubusercontent.com/byJoey/cfnewup/main/_worker.js -o upstream_worker.js
-          
-          # 2. 对比本地文件和上游文件
-          if cmp -s _worker.js upstream_worker.js; then
-            # 如果是手动点击运行的，即便没更新也强制帮您推一次
-            if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-              echo "手动触发测试，强制执行后续部署..."
-              echo "updated=true" >> $GITHUB_OUTPUT
-            else
-              echo "检测结果：上游代码未更新，自动终止后续部署任务，节省额度。"
-              echo "updated=false" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "检测结果：发现上游代码有新版本！准备执行部署..."
-            # 3. 覆盖本地旧代码
-            mv upstream_worker.js _worker.js
-            echo "updated=true" >> $GITHUB_OUTPUT
-            
-            # 4. 把更新的代码提交记录在您的仓库里，作为下次对比的基准
-            git config --global user.name "github-actions[bot]"
-            git config --global user.email "github-actions[bot]@users.noreply.github.com"
-            git add _worker.js
-            git commit -m "Auto sync: upstream _worker.js has been updated"
-            git push
-          fi
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/byJoey/cfnewup.git
+          git fetch upstream
+          git merge upstream/main --allow-unrelated-histories -m "Auto-merge upstream" || git merge upstream/master --allow-unrelated-histories -m "Auto-merge upstream" || echo "No merge needed."
           
       - name: Setup Node.js
-        if: steps.check_update.outputs.updated == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
       - name: Obfuscate Code
-        if: steps.check_update.outputs.updated == 'true'
         run: |
           npm install -g esbuild
           esbuild _worker.js --bundle --minify --format=esm --outfile=_worker_obf.js --external:cloudflare:sockets
           echo "代码混淆完成！"
 
       - name: Generate Wrangler Config
-        if: steps.check_update.outputs.updated == 'true'
         run: |
           cat << 'EOF' > wrangler.toml
           name = "cf-new-worker"
           main = "_worker_obf.js"
-          compatibility_date = "2023-10-30"
+          compatibility_date = "2026-01-20"
           workers_dev = false
 
           # 绑定自定义域名
@@ -79,10 +56,13 @@ jobs:
           [[kv_namespaces]]
           binding = "C"
           id = "bffe84479c1b43c1b04475b57d75e435"
+
+          # 注入隐蔽的环境变量
+          [vars]
+          U = "${{ secrets.WORKER_VAR_U }}"
           EOF
 
       - name: Deploy to Cloudflare Workers (Native CLI)
-        if: steps.check_update.outputs.updated == 'true'
         env:
           CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_GLOBAL_KEY }}
           CLOUDFLARE_EMAIL: ${{ secrets.CLOUDFLARE_EMAIL }}
