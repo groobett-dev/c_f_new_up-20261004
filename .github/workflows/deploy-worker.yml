@@ -17,16 +17,10 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Sync from Upstream
+      - name: 暴力无冲突拉取上游最新代码
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git remote add upstream https://github.com/byJoey/cfnewup.git
-          git fetch upstream
-          git merge upstream/main --allow-unrelated-histories -m "Auto-merge upstream" || git merge upstream/master --allow-unrelated-histories -m "Auto-merge upstream" || echo "No merge needed."
+          curl -sL https://raw.githubusercontent.com/byJoey/cfnewup/main/_worker.js -o _worker.js
           
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -57,9 +51,9 @@ jobs:
           binding = "C"
           id = "bffe84479c1b43c1b04475b57d75e435"
 
-          # 注入隐蔽的环境变量
+          # 注入隐蔽的环境变量 (修改大写 U 为小写 u)
           [vars]
-          U = "${{ secrets.WORKER_VAR_U }}"
+          u = "${{ secrets.WORKER_VAR_U }}"
           EOF
 
       - name: Deploy to Cloudflare Workers (Native CLI)
