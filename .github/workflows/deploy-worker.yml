@@ -38,8 +38,18 @@ jobs:
 
       - name: Obfuscate Code
         run: |
-          javascript-obfuscator _worker.js --output _worker_obf.js --compact true --control-flow-flattening true --dead-code-injection true --string-array true --string-array-encoding 'base64'
+          # 提取 import 语句，防止混淆器破坏 ES Module 导入
+          grep "^import" _worker.js > imports.js || true
+          sed -i '/^import/d' _worker.js || true
+          
+          javascript-obfuscator _worker.js --output _worker_temp.js --compact true --string-array true --string-array-encoding 'base64' --rename-globals false
+          
+          # 组装回去
+          cat imports.js > _worker_obf.js
+          cat _worker_temp.js >> _worker_obf.js
+          
           echo "代码混淆完成！"
+          ls -lh _worker_obf.js
 
       - name: Generate Wrangler Config
         run: |
@@ -47,7 +57,6 @@ jobs:
           name = "cf-new-worker"
           main = "_worker_obf.js"
           compatibility_date = "2023-10-30"
-          workers_dev = false
 
           routes = [
             { pattern = "20261003c_f_new.209app.ccwu.cc", custom_domain = true }
