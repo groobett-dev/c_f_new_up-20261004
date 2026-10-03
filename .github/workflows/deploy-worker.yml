@@ -33,13 +33,10 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install Tools
-        run: npm install -g javascript-obfuscator wrangler
-
       - name: Obfuscate Code
         run: |
-          # 开启原生 --module true，完美适配 Cloudflare 的 export default 格式
-          javascript-obfuscator _worker.js --output _worker_obf.js --compact true --module true --string-array true --string-array-encoding 'base64'
+          npm install -g esbuild
+          esbuild _worker.js --bundle --minify --format=esm --outfile=_worker_obf.js --external:cloudflare:sockets
           echo "代码混淆完成！"
 
       - name: Generate Wrangler Config
@@ -49,12 +46,10 @@ jobs:
           main = "_worker_obf.js"
           compatibility_date = "2023-10-30"
 
-          # 绑定自定义域名
           routes = [
             { pattern = "20261003c_f_new.209app.ccwu.cc", custom_domain = true }
           ]
 
-          # 绑定 KV 数据库
           [[kv_namespaces]]
           binding = "C"
           id = "bffe84479c1b43c1b04475b57d75e435"
@@ -66,5 +61,5 @@ jobs:
           CLOUDFLARE_EMAIL: ${{ secrets.CLOUDFLARE_EMAIL }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          # 直接使用官方原生命令行部署，绕过插件 Bug
+          npm install -g wrangler
           wrangler deploy
