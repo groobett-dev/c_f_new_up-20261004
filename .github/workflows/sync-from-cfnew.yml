@@ -8,40 +8,41 @@ on:
 jobs:
   sync-release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     
     steps:
       - name: 检出仓库
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
       
       - name: 获取 cfnew 最新发布
         id: get_latest
         run: |
-          # 获取最新 release 信息
           echo "正在获取最新发布信息..."
-          LATEST_RELEASE=$(curl -s https://api.github.com/repos/byJoey/cfnew/releases/latest)
+          LATEST_RELEASE=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" https://api.github.com/repos/byJoey/cfnew/releases/latest)
           
-          # 使用 sed 提取版本号（兼容性更好）
-          VERSION=$(echo "$LATEST_RELEASE" | sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p')
+          # 使用 jq 提取 tag_name 与 Pages.zip 的下载链接
+          VERSION=$(echo "$LATEST_RELEASE" | jq -r '.tag_name // empty')
+          if [ -z "$VERSION" ]; then
+            # 兼容使用 sed 解析
+            VERSION=$(echo "$LATEST_RELEASE" | sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p')
+          fi
           
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "最新版本: $VERSION"
           
-          # 获取所有 assets 文件
-          ASSETS_URL=$(echo "$LATEST_RELEASE" | sed -n 's/.*"assets_url": "\([^"]*\)".*/\1/p')
-          echo "正在获取文件列表..."
-          ASSETS=$(curl -s "$ASSETS_URL")
-          
-          # 查找 Pages.zip 文件
-          # 使用更可靠的方法查找包含 Pages.zip 的下载 URL
-          DOWNLOAD_URL=$(echo "$ASSETS" | grep -i "Pages\.zip" | grep -o '"browser_download_url": "[^"]*"' | sed 's/"browser_download_url": "\([^"]*\)"/\1/' | head -1)
+          DOWNLOAD_URL=$(echo "$LATEST_RELEASE" | jq -r '.assets[] | select(.name == "Pages.zip") | .browser_download_url // empty' | head -n 1)
+          if [ -z "$DOWNLOAD_URL" ]; then
+            DOWNLOAD_URL=$(echo "$LATEST_RELEASE" | grep -i "Pages\.zip" | grep -o '"browser_download_url": "[^"]*"' | sed 's/"browser_download_url": "\([^"]*\)"/\1/' | head -1)
+          fi
           FILE_NAME="Pages.zip"
           
-          if [ -z "$DOWNLOAD_URL" ]; then
+          if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
             echo "错误：未找到 Pages.zip 文件"
-            echo "可用的文件列表："
-            echo "$ASSETS" | grep -o '"name": "[^"]*"' | sed 's/"name": "\([^"]*\)"/  - \1/'
+            echo "返回内容: $LATEST_RELEASE"
             exit 1
           fi
           
@@ -53,7 +54,6 @@ jobs:
       - name: 检查当前版本
         id: check_version
         run: |
-          # 读取当前记录的版本，如果文件不存在则创建空文件
           if [ ! -f "VERSION.txt" ]; then
             echo "未找到版本记录文件，创建新文件"
             touch VERSION.txt
@@ -71,16 +71,11 @@ jobs:
           echo "latest_version=$NEW_VERSION" >> $GITHUB_OUTPUT
           echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
           
-          # 如果版本文件不存在或为空，或者版本不同，则需要更新
           if [ -z "$CURRENT_VERSION" ] || [ "$CURRENT_VERSION" != "$NEW_VERSION" ]; then
-            if [ -z "$CURRENT_VERSION" ]; then
-              echo "首次运行，将下载文件并创建版本记录"
-            else
-              echo "发现新版本 $CURRENT_VERSION -> $NEW_VERSION，需要更新"
-            fi
+            echo "发现新版本: 当前 '$CURRENT_VERSION' -> 最新 '$NEW_VERSION'，准备更新"
             echo "need_update=true" >> $GITHUB_OUTPUT
           else
-            echo "版本相同，无需更新"
+            echo "版本一致 ($CURRENT_VERSION)，无需更新"
             echo "need_update=false" >> $GITHUB_OUTPUT
           fi
       
@@ -91,17 +86,7 @@ jobs:
           FILE_NAME="${{ steps.get_latest.outputs.file_name }}"
           VERSION="${{ steps.get_latest.outputs.version }}"
           
-          if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
-            echo "错误：未找到可下载的文件"
-            exit 1
-          fi
-          
-          if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
-            echo "错误：未获取到版本号"
-            exit 1
-          fi
-          
-          echo "正在下载文件: $FILE_NAME"
+          echo "正在下载文件: $FILE_NAME 来自 $DOWNLOAD_URL"
           curl -L -o "$FILE_NAME" "$DOWNLOAD_URL"
           
           if [ ! -f "$FILE_NAME" ]; then
@@ -109,66 +94,38 @@ jobs:
             exit 1
           fi
           
-          echo "下载成功: $FILE_NAME"
-          
-          # 解压缩 Pages.zip
           echo "正在解压缩 $FILE_NAME..."
           unzip -o "$FILE_NAME" -d .
-          
-          if [ $? -ne 0 ]; then
-            echo "错误：解压缩失败"
-            exit 1
-          fi
-          
-          echo "解压缩成功"
-          
-          # 删除 zip 文件（可选，如果不需要保留）
           rm -f "$FILE_NAME"
-          echo "已删除压缩文件: $FILE_NAME"
           
-          # 确保创建或更新版本记录文件
-          if [ ! -f "VERSION.txt" ]; then
-            echo "创建版本记录文件"
-            touch VERSION.txt
-          fi
-          
-          # 写入版本号
+          # 更新版本文件
           echo "$VERSION" > VERSION.txt
-          echo "版本记录已创建/更新: $VERSION"
-          
-          # 验证文件是否成功写入
-          if [ -f "VERSION.txt" ] && [ -s "VERSION.txt" ]; then
-            echo "✓ 版本记录文件创建成功"
-          else
-            echo "✗ 警告：版本记录文件可能未正确创建"
-          fi
+          echo "版本记录已更新为: $VERSION"
       
       - name: 提交并推送更改
         if: steps.check_version.outputs.need_update == 'true'
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
           
           git add -A
           
           if git diff --staged --quiet; then
             echo "没有变更需要提交"
           else
-            git commit -m "自动同步: 更新到 cfnew ${{ steps.get_latest.outputs.version }}"
-            git push
-            echo "已提交并推送更新"
+            git commit -m "chore(sync): 自动同步 cfnew release $VERSION"
+            git push origin HEAD:main
+            echo "已成功提交并推送到 main 分支"
           fi
       
       - name: 输出摘要
+        if: always()
         run: |
-          echo "## 同步结果" >> $GITHUB_STEP_SUMMARY
-          echo "- 最新版本: ${{ steps.get_latest.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "- 当前版本: ${{ steps.check_version.outputs.current_version }}" >> $GITHUB_STEP_SUMMARY
-          
+          echo "## 同步结果摘要" >> $GITHUB_STEP_SUMMARY
+          echo "- **最新版本**: ${{ steps.get_latest.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **之前版本**: ${{ steps.check_version.outputs.current_version }}" >> $GITHUB_STEP_SUMMARY
           if [ "${{ steps.check_version.outputs.need_update }}" = "true" ]; then
-            echo "- 状态: ✅ 已更新到新版本" >> $GITHUB_STEP_SUMMARY
-            echo "- 下载文件: ${{ steps.get_latest.outputs.file_name }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **执行状态**: ✅ 已成功同步并推送到仓库" >> $GITHUB_STEP_SUMMARY
           else
-            echo "- 状态: ⏭️ 版本相同，无需更新" >> $GITHUB_STEP_SUMMARY
+            echo "- **执行状态**: ⏭️ 版本相同，跳过同步" >> $GITHUB_STEP_SUMMARY
           fi
-
